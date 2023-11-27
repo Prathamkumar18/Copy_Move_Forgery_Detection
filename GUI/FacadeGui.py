@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import *
 from tkinter import filedialog
 import cv2
 import numpy as np
