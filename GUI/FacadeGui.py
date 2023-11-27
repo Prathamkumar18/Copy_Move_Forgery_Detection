@@ -1,14 +1,20 @@
+import os
 import tkinter as tk
 from tkinter import filedialog
 import cv2
 import numpy as np
+import sys
+from PIL.Image import Image
 from PyQt5 import QtGui, QtWidgets, QtCore
 from Detector.SurfDetector import SurfDetector
+
+sys.setrecursionlimit(3000)
 
 class Facade():
     size = 720
     NPundo = np.empty((2, 2))
     NPimg = np.empty((2, 2))
+    recursion_depth = 0  # New variable to track recursion depth
 
     def setupUi(self, main_window):
         main_window.setObjectName("MainWindow")
@@ -123,14 +129,35 @@ class Facade():
         self.backup()
         root = tk.Tk()
         root.withdraw()
-        root.filename = filedialog.askopenfilename(initialdir="~",
-                                                   title="Select File",
-                                                   filetypes=(("jpeg files", "*.jpeg"), ("all files", "*.*")))
-        if root.filename:
-            self.image = cv2.imread(root.filename, cv2.IMREAD_COLOR)
-            self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
-            self.origImage = self.image.copy()
-            self.showImage(self.origImage)
+        self.selected_directory = filedialog.askdirectory(initialdir="~", title="Select Directory")
+        if self.selected_directory:
+            image_files = [f for f in os.listdir(self.selected_directory) if
+                           f.lower().endswith(('jpeg', 'jpg', 'png', 'tif', 'tiff'))]
+            if image_files:
+                # Process each image in the directory
+                for image_file in image_files:
+                    image_path = os.path.join(self.selected_directory, image_file)
+
+                    # Read TIF images using cv2.IMREAD_UNCHANGED to keep the alpha channel if present
+                    self.image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+
+                    # Convert to RGB if the image is not in color
+                    if len(self.image.shape) == 2:
+                        self.image = cv2.cvtColor(self.image, cv2.COLOR_GRAY2RGB)
+                    else:
+                        self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
+
+                    self.origImage = self.image.copy()
+                    self.showImage(self.origImage)
+
+                    # Check recursion depth before calling surfDetector
+                    if self.recursion_depth < 5:
+                        self.recursion_depth += 1
+                        self.surfDetector()
+                        self.recursion_depth -= 1
+
+            else:
+                print("No image files found in the selected directory.")
 
     def saveImage(self):
         root = tk.Tk()
@@ -154,6 +181,33 @@ class Facade():
         self.label.setPixmap(QtGui.QPixmap.fromImage(image_profile))
 
     def surfDetector(self):
+        print("Entering surfDetector")
         surf = SurfDetector(self.image)
+        print("Exited surfDetector")
         self.image = surf.image
         self.showImage(self.image)
+
+        if hasattr(self, 'origImage') and hasattr(self, 'image'):
+            if self.selected_directory:
+                output_directory = os.path.join(self.selected_directory, "processed_images")
+                print("Output Directory:", output_directory)
+                os.makedirs(output_directory, exist_ok=True)
+
+                # Use a unique filename for each processed image
+                base_filename = f"processed_{os.path.basename(self.selected_directory)}"
+                output_filename = f"{base_filename}_{len(os.listdir(output_directory)) + 1}.png"
+                output_filepath = os.path.join(output_directory, output_filename)
+
+                # Convert the image back to BGR before saving
+                output_image = cv2.cvtColor(self.image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(output_filepath, output_image)
+
+                print(f"Processed image saved: {output_filepath}")
+
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    MainWindow = QtWidgets.QMainWindow()
+    ui = Facade()
+    ui.setupUi(MainWindow)
+    MainWindow.show()
+    sys.exit(app.exec_())
